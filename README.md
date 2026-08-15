@@ -37,13 +37,24 @@ what the "+12" on a cast pill means.
 
 ## Input fairness
 
-Scores are only ever compared against your own history, so the drill
-eases its tolerances for the hardware in your hand and says which one it
-eased for (the "scoring for…" chip in the HUD). A pen keeps the strict
-reference; a mouse or trackpad, which pivots at the wrist and cannot
-creep, gets roughly double the room; a finger sits between. Start and
-grab zones move the other way — a screenless tablet needs the *biggest*
-targets, because the hand is out of sight. Relative tolerances carry an
-absolute pixel floor so a phone is never held to a stricter standard
-than a desktop for the same drill.
+Nothing in this drill is a stroke, so nothing in it is eased per device.
+Reading a colour is the same judgement from a pen, a trackpad or a thumb,
+and widening the tolerance for a phone would just hand it free points for
+the one thing the drill is actually testing. The HUD's "scoring for…"
+chip is the shared SDK reporting which pointer it detected; here it
+changes no number.
+
+What hardware *can* decide is whether you are able to enter the answer
+you meant, and that is what is guaranteed instead:
+
+* nine chips in a 3×3 grid, never under 56px tall (48px below 480px) and
+  typically much wider — well above the 44px floor;
+* nothing ever advances on a timer: the reveal stays up until you ask for
+  the next grid, and a 250ms guard stops a double-tap landing as a pick
+  on a grid you have not looked at.
+
+The choice is discrete: pointer precision does not enter the score
+anywhere. What *does* vary by hardware is the screen — the casts shrink
+to C 5–7 by grid 5, which is why the floor was raised off 3.5, below
+what an uncalibrated laptop panel can show.
 
