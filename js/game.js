@@ -337,12 +337,17 @@
 
   var toastTimer = null;
   function showToast(msg, celebrate) {
+    /* Unhide BEFORE filling. A live region that is mutated while it is
+       still `hidden` is mutated inside a subtree the accessibility tree
+       does not carry, and un-hiding it afterwards is not itself a content
+       change — so the round score announced to nobody. Show it first,
+       then write into it, and the announcement actually happens. */
+    toast.hidden = false;
     toast.innerHTML = '';
     var s = document.createElement('span');
     s.className = celebrate ? 'toast-accent' : '';
     s.textContent = msg;
     toast.appendChild(s);
-    toast.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { toast.hidden = true; }, 2200);
   }

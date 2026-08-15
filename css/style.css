@@ -448,19 +448,42 @@ a { color: inherit; }
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-.chip:hover:enabled { transform: translateY(-2px); box-shadow: 0 3px 0 var(--shadow); }
-.chip:active:enabled { transform: translateY(1px); box-shadow: none; }
+.chip:hover:enabled { transform: translateY(-2px); }
+.chip:active:enabled { transform: translateY(1px); }
+/* The lift's drop-shadow, but only on a chip carrying no reveal mark.
+   box-shadow is ONE property: this rule used to out-specify .is-picked
+   (0,3,0 over 0,2,0), so simply moving the pointer across your own
+   picked chip erased the ring that says which one you picked. */
+.chip:hover:enabled:not(.is-neutral):not(.is-picked) { box-shadow: 0 3px 0 var(--shadow); }
+.chip:active:enabled:not(.is-neutral):not(.is-picked) { box-shadow: none; }
 .chip:disabled { cursor: default; }
 
-/* reveal: the true neutral gets the accent ring */
+/* reveal: the true neutral gets the accent ring.
+   A ring, not an `outline`: `outline` is the one property :focus-visible
+   needs, and these chips STAY focusable through the reveal (any of them
+   continues the round). A keyboard player who picked the neutral saw the
+   focus ring REPLACE the answer ring — the single mark the reveal
+   exists to show. As a box-shadow the two coexist. */
 .chip.is-neutral {
-  outline: 3px solid var(--game-accent);
-  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 5px var(--game-accent);
 }
 
-/* reveal: the chip you tapped gets a graphite inner ring */
+/* reveal: the chip you tapped gets a paper-then-graphite inner ring.
+   The fills are absolute sRGB ground truth (L* 50–65) and deliberately
+   ignore the theme, so this mark must not follow it either: pinned
+   graphite holds 3.2–5.3:1 against every chip in BOTH themes, where the
+   night studio's near-white --ink managed only ~2.2:1 on the lightest
+   ones — the same reasoning temperature-sort pins its strip ticks with. */
 .chip.is-picked {
-  box-shadow: inset 0 0 0 3px var(--card), inset 0 0 0 5px var(--ink);
+  box-shadow: inset 0 0 0 3px #FDFAF1, inset 0 0 0 5px #33291E;
+}
+
+/* picking the neutral earns both marks; box-shadow is one property, so
+   the pair has to be spelled out or the more-specific rule eats the other */
+.chip.is-neutral.is-picked {
+  box-shadow:
+    0 0 0 2px var(--card), 0 0 0 5px var(--game-accent),
+    inset 0 0 0 3px #FDFAF1, inset 0 0 0 5px #33291E;
 }
 
 /* reveal: cast annotation pill — card-backed so it reads on any grey */
