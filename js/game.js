@@ -4,8 +4,10 @@
    neutral (C < 0.5) — tap the neutral. Chips are generated in
    CIELAB and converted to sRGB, so the drill holds exact
    ground truth for scoring. DOM drill, no canvas: chip fills
-   are absolute sRGB and must NOT follow the theme; all other
-   inks are CSS variables, so no repaint pass is needed.
+   are absolute sRGB and must NOT follow the theme, and every
+   ink around them is a CSS variable, so the cascade handles a
+   theme flip on its own — the onTheme hook below is a cheap
+   safety net, not load-bearing.
    ============================================================ */
 (function () {
   'use strict';
@@ -14,20 +16,43 @@
   var ITEMS_PER_ROUND = 5;
   var CHIP_COUNT = 9;      /* 3x3 — eight casts + one neutral */
   var MIN_HUE_GAP = 25;    /* degrees between any two cast hues */
-  var REVEAL_MS = 1400;
+
+  /* The reveal is the teaching moment: a wrong pick gets time to
+     study, a right pick stays brisk, and any tap on the revealed
+     grid advances early. The guards keep double-taps honest: one
+     so the tap that caused the reveal can't also skip it, one so
+     a stale advance-tap can't pick on a fresh grid. */
+  var REVEAL_OK_MS = 1200;
+  var REVEAL_WRONG_MS = 2600;
+  var REVEAL_GUARD_MS = 350;
+  var PICK_GUARD_MS = 250;
 
   /* ---- pure scoring + colour math (no DOM, unit-testable) ---- */
 
-  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+  /* NaN-safe on purpose: a non-finite input clamps to 0 rather than
+     leaking a NaN into a score or a colour channel. */
+  function clamp01(v) { return v > 0 ? (v < 1 ? v : 1) : 0; }
 
   function lerp(a, b, t) { return a + (b - a) * t; }
 
-  /* Correct pick = 100. A wrong pick is judged by how neutral it
-     still was — credit fades to zero at chroma 18 — then haircut
-     to 55% because it wasn't the neutral. */
-  function scoreChoice(isNeutral, chosenChroma) {
+  /* Correct pick = 100. A wrong pick is judged by how neutral it still
+     was *relative to the casts on this grid*: the grid's strongest cast
+     scores 0, the subtlest one scores most, then a haircut to 55% keeps
+     every miss below every hit.
+     Grading per grid is the whole point — casts shrink from C 10–16 on
+     grid 1 to C 3.5–6 on grid 5, so a fixed yardstick would pay MORE
+     for missing the hard grids than the easy ones. */
+  function scoreChoice(isNeutral, chosenChroma, gridMaxChroma) {
     if (isNeutral) return 100;
-    return 100 * clamp01(1 - chosenChroma / 18) * 0.55;
+    if (!(gridMaxChroma > 0)) return 0;
+    return 100 * clamp01(1 - chosenChroma / gridMaxChroma) * 0.55;
+  }
+
+  /* strongest cast on the grid — the yardstick scoreChoice grades against */
+  function maxChromaOf(list) {
+    var m = 0;
+    for (var i = 0; i < list.length; i++) if (list[i].chroma > m) m = list[i].chroma;
+    return m;
   }
 
   function roundScore(scores) {
@@ -44,13 +69,17 @@
     return { lo: lerp(10, 3.5, t), hi: lerp(16, 6, t) };
   }
 
-  /* Hue sector → temperature word. Warm covers red→orange→yellow,
-     h in [-45°, 135°); everything else reads cool. */
+  /* Hue → cast label. Warm covers red→orange→yellow, cool covers
+     green→teal→blue; violet and magenta are NAMED instead of
+     called warm/cool — their temperature depends on context, the
+     same stance temperature-sort's how-to takes. Lab hue degrees. */
   function castLabel(hueDeg, chroma) {
     if (chroma < 0.5) return 'neutral';
     var h = ((hueDeg % 360) + 360) % 360;
-    var warm = h < 135 || h >= 315;
-    return (warm ? 'warm +' : 'cool +') + Math.round(chroma);
+    var amt = ' +' + Math.round(chroma);
+    if (h >= 285 && h < 325) return 'violet' + amt;
+    if (h >= 325 && h < 350) return 'magenta' + amt;
+    return ((h < 135 || h >= 350) ? 'warm' : 'cool') + amt;
   }
 
   /* CIELAB (D65) → sRGB [0–255], gamut-clamped. Near-greys at
@@ -64,13 +93,22 @@
     var X = finv(fx) * 0.95047;
     var Y = (L > k * e) ? fy * fy * fy : L / k;
     var Z = finv(fz) * 1.08883;
-    var rl = 3.2406 * X - 1.5372 * Y - 0.4986 * Z;
-    var gl = -0.9689 * X + 1.8758 * Y + 0.0415 * Z;
-    var bl = 0.0557 * X - 0.2040 * Y + 1.0570 * Z;
     function gam(c) {
       c = clamp01(c);
       return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
     }
+    /* A neutral (a = b = 0) is the D65 white point scaled by Y, so its
+       linear RGB is exactly (Y, Y, Y). Use that identity directly: the
+       4-decimal matrix below rounds one channel off by 1/255 at some
+       lightnesses, which would leak a faint cast into the one chip the
+       whole drill promises is castless. */
+    if (a === 0 && b === 0) {
+      var g = Math.round(gam(Y) * 255);
+      return [g, g, g];
+    }
+    var rl = 3.2406 * X - 1.5372 * Y - 0.4986 * Z;
+    var gl = -0.9689 * X + 1.8758 * Y + 0.0415 * Z;
+    var bl = 0.0557 * X - 0.2040 * Y + 1.0570 * Z;
     return [Math.round(gam(rl) * 255), Math.round(gam(gl) * 255), Math.round(gam(bl) * 255)];
   }
 
@@ -133,39 +171,59 @@
   var hudRound = document.getElementById('hudRound');
   var hudScore = document.getElementById('hudScore');
   var hudBest = document.getElementById('hudBest');
+  var btnRound = document.getElementById('btnRound');
 
   ArtDaily.init({ slug: SLUG });
 
   /* ---- round state ---- */
   var round = 0, itemIdx = 0, scores = [], chips = [];
   var playing = false, revealed = false, pickedIdx = -1, revealTimer = null;
+  var revealAt = 0, itemStartAt = 0;
 
-  /* render() rebuilds the grid from state, so it is safe to call
-     at any moment — including from the theme hook mid-reveal. */
-  function render() {
+  /* The nine buttons are built ONCE and repainted in place, so a
+     keyboard player's focus survives every reveal and advance
+     (same persistent-button pattern as temperature-sort). */
+  var chipEls = [];
+  function buildChips() {
     grid.innerHTML = '';
-    for (var i = 0; i < chips.length; i++) {
-      var chip = chips[i];
+    chipEls = [];
+    for (var i = 0; i < CHIP_COUNT; i++) {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'chip';
+      btn.dataset.idx = String(i);
+      grid.appendChild(btn);
+      chipEls.push(btn);
+    }
+  }
+
+  /* render() repaints the persistent buttons from state, so it is
+     safe to call at any moment — including from the theme hook
+     mid-reveal. During a reveal the chips stay ENABLED: any tap
+     advances, and focus is never dropped to <body>. */
+  function render() {
+    if (!chips.length) return;
+    for (var i = 0; i < chipEls.length; i++) {
+      var chip = chips[i];
+      var btn = chipEls[i];
       var rgb = lab2rgb(chip.L, chip.a, chip.b);
       btn.style.background = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
-      btn.dataset.idx = String(i);
+      btn.classList.toggle('is-neutral', revealed && chip.neutral);
+      btn.classList.toggle('is-picked', revealed && i === pickedIdx);
+      btn.disabled = revealed && !playing; /* dead only once the round is over */
+      btn.innerHTML = '';
       if (revealed) {
-        btn.disabled = true;
         var label = castLabel(chip.hue, chip.chroma);
-        if (chip.neutral) btn.className += ' is-neutral';
-        if (i === pickedIdx) btn.className += ' is-picked';
         var pill = document.createElement('span');
         pill.className = 'chip-label';
         pill.textContent = label;
         btn.appendChild(pill);
-        btn.setAttribute('aria-label', 'chip ' + (i + 1) + ': ' + label + (i === pickedIdx ? ' — your pick' : ''));
+        btn.setAttribute('aria-label', 'chip ' + (i + 1) + ': ' + label +
+          (i === pickedIdx ? ' — your pick' : '') +
+          (playing ? ' — activate to continue' : ''));
       } else {
         btn.setAttribute('aria-label', 'grey chip ' + (i + 1) + ' of ' + chips.length);
       }
-      grid.appendChild(btn);
     }
   }
 
@@ -173,8 +231,12 @@
     chips = makeItem(itemIdx);
     revealed = false;
     pickedIdx = -1;
+    itemStartAt = Date.now();
     render();
-    hint.textContent = 'grid ' + (itemIdx + 1) + ' of ' + ITEMS_PER_ROUND + ' — tap the true neutral.';
+    /* grid 1 teaches the term; later grids stay terse */
+    hint.textContent = itemIdx === 0
+      ? 'grid 1 of ' + ITEMS_PER_ROUND + ' — eight greys hide a colour cast. tap the one with none.'
+      : 'grid ' + (itemIdx + 1) + ' of ' + ITEMS_PER_ROUND + ' — tap the true neutral.';
   }
 
   function newRound() {
@@ -201,12 +263,15 @@
     if (!chip) return;
     pickedIdx = idx;
     revealed = true;
-    scores.push(scoreChoice(chip.neutral, chip.chroma));
+    revealAt = Date.now();
+    var sc = Math.round(scoreChoice(chip.neutral, chip.chroma, maxChromaOf(chips)));
+    scores.push(sc);
     render();
     hint.textContent = chip.neutral
-      ? 'yes — that is the true neutral.'
-      : 'that grey leans ' + castLabel(chip.hue, chip.chroma) + ' — the ringed chip is the neutral.';
-    revealTimer = setTimeout(nextItem, REVEAL_MS);
+      ? 'yes — that is the true neutral. 100/100.'
+      : 'that grey leans ' + castLabel(chip.hue, chip.chroma) + ' — ' + sc +
+        '/100. the ringed chip is the neutral — tap to continue.';
+    revealTimer = setTimeout(nextItem, chip.neutral ? REVEAL_OK_MS : REVEAL_WRONG_MS);
   }
 
   function nextItem() {
@@ -215,9 +280,17 @@
     startItem();
   }
 
-  /* click covers touch, mouse and Enter/Space on the buttons */
+  /* click covers touch, mouse and Enter/Space on the buttons.
+     During a reveal the whole grid is one big "continue" button. */
   grid.addEventListener('click', function (ev) {
-    if (!playing || revealed) return;
+    if (!playing) return;
+    if (revealed) {
+      if (Date.now() - revealAt < REVEAL_GUARD_MS) return;
+      clearTimeout(revealTimer);
+      nextItem();
+      return;
+    }
+    if (Date.now() - itemStartAt < PICK_GUARD_MS) return;
     var el = ev.target;
     while (el && el !== grid && !(el.dataset && el.dataset.idx)) el = el.parentNode;
     if (!el || el === grid) return;
@@ -226,10 +299,17 @@
 
   function finishRound() {
     playing = false;
+    clearTimeout(revealTimer);
+    /* capture focus BEFORE the repaint disables the chips (disabling
+       a focused button drops focus to <body> synchronously) */
+    var focusWasInGrid = grid.contains(document.activeElement);
+    render(); /* chips go quiet but the last reveal stays readable */
     var res = ArtDaily.report(roundScore(scores));
     hudScore.textContent = String(res.score);
     hudBest.textContent = res.best === null ? '–' : String(res.best);
-    hint.textContent = 'round done — press “new round” to hunt again.';
+    hint.textContent = 'round done (' + scores.join(' · ') + ') — press “new round” to hunt again.';
+    /* hand keyboard focus to the one live control instead */
+    if (focusWasInGrid) btnRound.focus();
     showToast((res.isNewBest ? 'new best! ' : 'score ') + res.score + ' / 100', res.isNewBest);
   }
 
@@ -246,7 +326,7 @@
   }
 
   /* ---- chrome wiring ---- */
-  document.getElementById('btnRound').addEventListener('click', newRound);
+  btnRound.addEventListener('click', newRound);
 
   var btnHow = document.getElementById('btnHow');
   var howTo = document.getElementById('howTo');
@@ -255,8 +335,12 @@
     btnHow.setAttribute('aria-expanded', String(!howTo.hidden));
   });
 
-  /* Chip fills are ground truth and ignore the theme; re-render so
-     rings and pills restyle instantly under the new CSS variables.
+  /* Chip fills are ground truth and ignore the theme; the rings and
+     pills around them are CSS variables, so the cascade already
+     restyles them with no JS at all. render() is registered anyway so
+     the drill keeps the family's repaint contract and stays correct if
+     anything theme-dependent is ever painted from JS — it is safe to
+     call at any moment, including mid-reveal.
      (No canvas → no fitCanvas/DPR pass and no resize handler; the
      grid is fluid CSS.) */
   ArtDaily.onTheme(render);
@@ -264,5 +348,6 @@
   /* ---- boot ---- */
   var best = ArtDaily.best();
   hudBest.textContent = best === null ? '–' : String(best);
+  buildChips();
   newRound();
 })();
