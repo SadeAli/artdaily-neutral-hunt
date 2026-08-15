@@ -17,13 +17,16 @@
   var CHIP_COUNT = 9;      /* 3x3 — eight casts + one neutral */
   var MIN_HUE_GAP = 25;    /* degrees between any two cast hues */
 
-  /* The reveal is the teaching moment: a wrong pick gets time to
-     study, a right pick stays brisk, and any tap on the revealed
-     grid advances early. The guards keep double-taps honest: one
-     so the tap that caused the reveal can't also skip it, one so
-     a stale advance-tap can't pick on a fresh grid. */
-  var REVEAL_OK_MS = 1200;
-  var REVEAL_WRONG_MS = 2600;
+  /* THE REVEAL NEVER EXPIRES. It used to auto-advance after 1.2s on a
+     hit, and the fresh grid was live again 250ms later — so a player who
+     clicked once more to acknowledge what they had just been shown
+     registered a real, SCORED pick on a grid they had never looked at.
+     That is a lost point caused purely by timing, and it contradicted
+     the sibling drill's own promise that the board never changes under
+     a finger. Now nothing advances until the player says so: "next
+     grid", a tap anywhere on the grid, or Enter/Space on a chip.
+     The two guards remain, so a double-tap can neither skip the reveal
+     it just earned nor land as a pick on the next grid. */
   var REVEAL_GUARD_MS = 350;
   var PICK_GUARD_MS = 250;
 
@@ -62,11 +65,13 @@
     return sum / scores.length;
   }
 
-  /* Casts shrink across the round: C 10–16 on grid 1 down to
-     C 3.5–6 on grid 5. */
+  /* Casts shrink across the round: C 10–16 on grid 1 down to C 5–7 on
+     grid 5. The old floor of 3.5 sat at or below what an uncalibrated
+     laptop panel can show — the round ended on a grid a beginner could
+     not win for reasons that had nothing to do with their eye. */
   function chromaRange(itemIdx) {
     var t = itemIdx / (ITEMS_PER_ROUND - 1);
-    return { lo: lerp(10, 3.5, t), hi: lerp(16, 6, t) };
+    return { lo: lerp(10, 5, t), hi: lerp(16, 7, t) };
   }
 
   /* Hue → cast label. Warm covers red→orange→yellow, cool covers
@@ -176,8 +181,10 @@
   ArtDaily.init({ slug: SLUG });
 
   /* ---- round state ---- */
+  var btnNext = document.getElementById('btnNext');
+
   var round = 0, itemIdx = 0, scores = [], chips = [];
-  var playing = false, revealed = false, pickedIdx = -1, revealTimer = null;
+  var playing = false, revealed = false, pickedIdx = -1;
   var revealAt = 0, itemStartAt = 0;
 
   /* The nine buttons are built ONCE and repainted in place, so a
@@ -232,20 +239,21 @@
     revealed = false;
     pickedIdx = -1;
     itemStartAt = Date.now();
+    btnNext.hidden = true;
     render();
     /* grid 1 teaches the term; later grids stay terse */
     hint.textContent = itemIdx === 0
-      ? 'grid 1 of ' + ITEMS_PER_ROUND + ' — eight greys hide a colour cast. tap the one with none.'
-      : 'grid ' + (itemIdx + 1) + ' of ' + ITEMS_PER_ROUND + ' — tap the true neutral.';
+      ? 'grid 1 of ' + ITEMS_PER_ROUND + ' — eight of these greys lean slightly warm or cool.' +
+        ' one leans nowhere at all. tap that one.'
+      : 'grid ' + (itemIdx + 1) + ' of ' + ITEMS_PER_ROUND + ' — tap the grey that leans nowhere.';
   }
 
   function newRound() {
-    clearTimeout(revealTimer);
-    /* If all five picks are in but the final reveal's timer hadn't
-       fired yet, the round is complete — report it before resetting,
-       so "new round" mid-reveal never swallows a finished round.
-       finishRound() flips playing to false, so this cannot double-
-       report: the timer path and this flush are mutually exclusive. */
+    /* If all five picks are in but the player had not moved on from the
+       final reveal yet, the round is complete — report it before
+       resetting, so "new round" mid-reveal never swallows a finished
+       round. finishRound() flips playing to false, so this cannot
+       double-report. */
     if (playing && scores.length >= ITEMS_PER_ROUND) finishRound();
     round += 1;
     itemIdx = 0;
@@ -267,11 +275,18 @@
     var sc = Math.round(scoreChoice(chip.neutral, chip.chroma, maxChromaOf(chips)));
     scores.push(sc);
     render();
+    /* "+12" is the strength of the cast; say so once, on grid 1, so the
+       player learns the scale and not just the word */
+    var scaleNote = itemIdx === 0
+      ? ' (the number is how strong that lean is — a true neutral is 0)'
+      : '';
     hint.textContent = chip.neutral
-      ? 'yes — that is the true neutral. 100/100.'
+      ? 'yes — that one leans nowhere. 100/100.' + scaleNote +
+        ' take as long as you like, then “next grid”.'
       : 'that grey leans ' + castLabel(chip.hue, chip.chroma) + ' — ' + sc +
-        '/100. the ringed chip is the neutral — tap to continue.';
-    revealTimer = setTimeout(nextItem, chip.neutral ? REVEAL_OK_MS : REVEAL_WRONG_MS);
+        '/100.' + scaleNote + ' the ringed chip is the neutral. “next grid” when you have looked.';
+    btnNext.hidden = false;
+    btnNext.textContent = itemIdx + 1 >= ITEMS_PER_ROUND ? 'finish round' : 'next grid →';
   }
 
   function nextItem() {
@@ -280,14 +295,21 @@
     startItem();
   }
 
+  /* explicit tap-to-continue, the same contract value-trap keeps: the
+     board only ever changes because the player asked it to */
+  function advance() {
+    if (!playing || !revealed) return;
+    if (Date.now() - revealAt < REVEAL_GUARD_MS) return;
+    nextItem();
+  }
+  btnNext.addEventListener('click', advance);
+
   /* click covers touch, mouse and Enter/Space on the buttons.
      During a reveal the whole grid is one big "continue" button. */
   grid.addEventListener('click', function (ev) {
     if (!playing) return;
     if (revealed) {
-      if (Date.now() - revealAt < REVEAL_GUARD_MS) return;
-      clearTimeout(revealTimer);
-      nextItem();
+      advance();
       return;
     }
     if (Date.now() - itemStartAt < PICK_GUARD_MS) return;
@@ -299,7 +321,7 @@
 
   function finishRound() {
     playing = false;
-    clearTimeout(revealTimer);
+    btnNext.hidden = true;
     /* capture focus BEFORE the repaint disables the chips (disabling
        a focused button drops focus to <body> synchronously) */
     var focusWasInGrid = grid.contains(document.activeElement);

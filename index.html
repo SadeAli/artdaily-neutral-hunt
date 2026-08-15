@@ -43,13 +43,17 @@
           <div class="hud-stat"><dt>round</dt><dd id="hudRound">–</dd></div>
           <div class="hud-stat"><dt>score</dt><dd id="hudScore">–</dd></div>
           <div class="hud-stat"><dt>best</dt><dd id="hudBest">–</dd></div>
+                <div class="hud-stat hud-input"><dd id="inputMode" hidden></dd></div>
         </dl>
       </div>
 
       <p class="hint" id="hint">Loading…</p>
 
+      <p class="nh-setup">Screen check: turn Night Shift / f.lux / any blue-light filter <strong>off</strong> and put the brightness up. The last grids measure colour casts of about 4 units — a warm screen filter hides them completely.</p>
+
       <div class="game-stage">
         <div class="chip-grid" id="chipGrid" role="group" aria-label="Neutral Hunt drill — nine near-grey chips"></div>
+        <button class="btn btn-primary nh-next" id="btnNext" type="button" hidden>next grid <span aria-hidden="true">→</span></button>
         <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       </div>
 
@@ -60,7 +64,8 @@
       <div class="howto" id="howTo" hidden>
         <p class="howto-cmd" aria-hidden="true"><span class="prompt">$</span> man neutral-hunt</p>
         <p>Eight of the nine near-greys hide a colour cast; one is a true neutral — no cast at all. Tap it. Five grids per round, and the casts get subtler as you go.</p>
-        <p>A right pick scores 100; a wrong one still earns a little, judged against the other casts on that same grid — the subtler the chip you fell for, the more it earns. Round score is the mean of five. After the reveal, tap anywhere on the grid to move on — wrong picks get a longer look.</p>
+        <p>A right pick scores 100; a wrong one still earns a little, judged against the other casts on that same grid — the subtler the chip you fell for, the more it earns. Round score is the mean of five. The reveal stays up until <em>you</em> move on: press “next grid”, or tap anywhere on the grid. Nothing ever changes under your hand.</p>
+        <p>On the reveal each chip is labelled with its cast and how strong it is — “warm +12” means a warm cast 12 units strong. A true neutral is 0, and about 4 is as faint as this drill goes.</p>
         <p>Violet and magenta casts are named, not called warm or cool — their temperature depends on context.</p>
         <p>Why it matters: casts sneak into “grey” mixes on the palette. This trains the eye that catches them before they reach the canvas.</p>
         <p>Studio tip: compare neighbours, not chips in isolation — a cast only shows against its rivals.</p>
