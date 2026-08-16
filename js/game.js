@@ -234,6 +234,21 @@
     }
   }
 
+  /* The markup ships this button as `next grid <span aria-hidden>→</span>`
+     — the glyph is decoration — and relabelling it with textContent put
+     the arrow back into the accessible name ("next grid right arrow").
+     Rebuild the label the way the markup does it. */
+  function setBtnLabel(btn, text, glyph) {
+    btn.innerHTML = '';
+    btn.appendChild(document.createTextNode(glyph ? text + ' ' : text));
+    if (glyph) {
+      var g = document.createElement('span');
+      g.setAttribute('aria-hidden', 'true');
+      g.textContent = glyph;
+      btn.appendChild(g);
+    }
+  }
+
   function startItem() {
     chips = makeItem(itemIdx);
     revealed = false;
@@ -286,7 +301,8 @@
       : 'that grey leans ' + castLabel(chip.hue, chip.chroma) + ' — ' + sc +
         '/100.' + scaleNote + ' the ringed chip is the neutral. “next grid” when you have looked.';
     btnNext.hidden = false;
-    btnNext.textContent = itemIdx + 1 >= ITEMS_PER_ROUND ? 'finish round' : 'next grid →';
+    if (itemIdx + 1 >= ITEMS_PER_ROUND) setBtnLabel(btnNext, 'finish round');
+    else setBtnLabel(btnNext, 'next grid', '→');
   }
 
   function nextItem() {
