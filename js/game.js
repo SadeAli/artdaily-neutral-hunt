@@ -295,12 +295,37 @@
     startItem();
   }
 
+  /* THE FOCUS HAND-OFF. The nine chips persist across a reveal, so a
+     keyboard player standing on a CHIP keeps their place for free — but
+     "next grid" does not: startItem() hides it the instant it is used,
+     and hiding the focused element drops focus to <body>. So the one
+     control whose whole job is "carry on" threw the player back to the
+     top of the page, on every single grid, five times a round. Same at
+     round end, where the old guard only looked inside the grid and so
+     missed a player standing on that button.
+     Note where focus stood BEFORE the repaint, and only step in if the
+     repaint actually dropped it — a player on chip 7 must stay on chip 7
+     rather than be yanked to chip 1. */
+  function focusWasLive() {
+    var a = document.activeElement;
+    return !!a && (a === btnNext || grid.contains(a));
+  }
+  function focusLost() {
+    var a = document.activeElement;
+    return !a || a === document.body || a === document.documentElement;
+  }
+
   /* explicit tap-to-continue, the same contract value-trap keeps: the
      board only ever changes because the player asked it to */
   function advance() {
     if (!playing || !revealed) return;
     if (Date.now() - revealAt < REVEAL_GUARD_MS) return;
+    var hadFocus = focusWasLive();
     nextItem();
+    /* nextItem() either dealt a fresh grid — chips live, "next grid"
+       gone — or finished the round, in which case finishRound() has
+       already placed focus itself. */
+    if (hadFocus && playing && focusLost() && chipEls[0]) chipEls[0].focus();
   }
   btnNext.addEventListener('click', advance);
 
@@ -321,17 +346,19 @@
 
   function finishRound() {
     playing = false;
+    /* Capture focus BEFORE anything here kills it — BOTH ways it can
+       die: hiding "next grid" (the player may be standing on it) and
+       disabling the chips, each of which drops focus to <body>
+       synchronously. */
+    var hadFocus = focusWasLive();
     btnNext.hidden = true;
-    /* capture focus BEFORE the repaint disables the chips (disabling
-       a focused button drops focus to <body> synchronously) */
-    var focusWasInGrid = grid.contains(document.activeElement);
     render(); /* chips go quiet but the last reveal stays readable */
     var res = ArtDaily.report(roundScore(scores));
     hudScore.textContent = String(res.score);
     hudBest.textContent = res.best === null ? '–' : String(res.best);
     hint.textContent = 'round done (' + scores.join(' · ') + ') — press “new round” to hunt again.';
     /* hand keyboard focus to the one live control instead */
-    if (focusWasInGrid) btnRound.focus();
+    if (hadFocus && focusLost()) btnRound.focus();
     showToast((res.isNewBest ? 'new best! ' : 'score ') + res.score + ' / 100', res.isNewBest);
   }
 
